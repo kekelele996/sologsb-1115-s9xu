@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
-import type { DetStatus, Specimen } from '@/types'
+import type { DetStatus, Specimen, TreatmentFilterStatus, TreatmentItem, TreatmentOrder } from '@/types'
+import { latestTreatmentOf } from '@/utils/treatment'
 
 export interface SpecimenFilterState {
   order: string
   family: string
   status: DetStatus | ''
+  treatmentStatus: TreatmentFilterStatus | ''
   siteId: string
   dateFrom: string
   dateTo: string
@@ -15,6 +17,7 @@ export const EMPTY_FILTER: SpecimenFilterState = {
   order: '',
   family: '',
   status: '',
+  treatmentStatus: '',
   siteId: '',
   dateFrom: '',
   dateTo: '',
@@ -22,7 +25,10 @@ export const EMPTY_FILTER: SpecimenFilterState = {
 }
 
 /** 组合筛选条件，返回过滤结果、命中数与可选的目/科候选 */
-export function useSpecimenFilter(specimens: Specimen[]): {
+export function useSpecimenFilter(
+  specimens: Specimen[],
+  treatment: { orders: TreatmentOrder[]; items: TreatmentItem[] } = { orders: [], items: [] }
+): {
   filter: SpecimenFilterState
   setFilter: (patch: Partial<SpecimenFilterState>) => void
   reset: () => void
@@ -53,6 +59,15 @@ export function useSpecimenFilter(specimens: Specimen[]): {
       if (filter.order && item.order !== filter.order) return false
       if (filter.family && item.family !== filter.family) return false
       if (filter.status && item.status !== filter.status) return false
+      if (filter.treatmentStatus) {
+        // 按熏蒸处理状态筛选：未处理 = 不在任何处理明细上
+        const current = latestTreatmentOf(treatment.orders, treatment.items, item.id)
+        if (filter.treatmentStatus === '未处理') {
+          if (current) return false
+        } else if (!current || current.item.status !== filter.treatmentStatus) {
+          return false
+        }
+      }
       if (filter.siteId && item.siteId !== filter.siteId) return false
       if (filter.dateFrom && item.collectDate < filter.dateFrom) return false
       if (filter.dateTo && item.collectDate > filter.dateTo) return false
@@ -73,7 +88,7 @@ export function useSpecimenFilter(specimens: Specimen[]): {
       }
       return true
     })
-  }, [specimens, filter])
+  }, [specimens, filter, treatment.orders, treatment.items])
 
   return { filter, setFilter, reset, filtered, hitCount: filtered.length, orders, families }
 }

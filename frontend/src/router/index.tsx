@@ -5,8 +5,9 @@ import SitesPage from '@/pages/SitesPage'
 import CollectPage from '@/pages/CollectPage'
 import DeterminationPage from '@/pages/DeterminationPage'
 import StoragePage from '@/pages/StoragePage'
+import FumigationPage from '@/pages/FumigationPage'
 
-/** 前端路由：/specimens /collect /sites /determination /storage */
+/** 前端路由：/specimens /collect /sites /determination /storage /fumigation */
 export function AppRoutes(): JSX.Element {
   return (
     <Routes>
@@ -17,6 +18,7 @@ export function AppRoutes(): JSX.Element {
         <Route path="/sites" element={<SitesPage />} />
         <Route path="/determination" element={<DeterminationPage />} />
         <Route path="/storage" element={<StoragePage />} />
+        <Route path="/fumigation" element={<FumigationPage />} />
         <Route path="*" element={<Navigate to="/specimens" replace />} />
       </Route>
     </Routes>

@@ -1,22 +1,29 @@
 import { useStore } from 'zustand'
 import type { StoreApi, UseBoundStore } from 'zustand'
 import Dexie, { type Table } from 'dexie'
-import type { CollectSite, Determination, Specimen, Storage } from '@/types'
+import type { CollectSite, Determination, Specimen, Storage, TreatmentItem, TreatmentOrder } from '@/types'
 
 /** IndexedDB 数据结构版本号 */
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 export interface MetaRow {
   key: string
   value: number
 }
 
-/** Dexie 封装：标本 / 采集地 / 保藏位置 / 鉴定记录 四张业务表 + 元数据表 */
+/**
+ * Dexie 封装：
+ * 馆藏台账 —— 标本 / 采集地 / 保藏位置 / 鉴定记录；
+ * 处理组台账 —— 熏蒸处理单 / 处理明细（与馆藏台账分表记录，两边各改各的，靠编号与柜位快照对账）；
+ * 外带元数据表。
+ */
 class InsectLogDb extends Dexie {
   specimens!: Table<Specimen, string>
   sites!: Table<CollectSite, string>
   storages!: Table<Storage, string>
   determinations!: Table<Determination, string>
+  treatmentOrders!: Table<TreatmentOrder, string>
+  treatmentItems!: Table<TreatmentItem, string>
   meta!: Table<MetaRow, string>
 
   constructor() {
@@ -29,7 +36,7 @@ class InsectLogDb extends Dexie {
       meta: 'key'
     })
     // v2：新增「采集方式」字段，迁移时为历史标本补齐默认采集方式（扫网）
-    this.version(SCHEMA_VERSION)
+    this.version(2)
       .stores({
         specimens: 'id, code, order, family, status, siteId, collectDate',
         sites: 'id, code, name, habitat',
@@ -47,6 +54,16 @@ class InsectLogDb extends Dexie {
             }
           })
       })
+    // v3：新增熏蒸处理单 / 处理明细两张表，仅加表、历史数据无需迁移
+    this.version(SCHEMA_VERSION).stores({
+      specimens: 'id, code, order, family, status, siteId, collectDate',
+      sites: 'id, code, name, habitat',
+      storages: 'id, specimenId, cabinet, drawer',
+      determinations: 'id, specimenId, determiner, date',
+      treatmentOrders: 'id, code, status',
+      treatmentItems: 'id, orderId, specimenId, status',
+      meta: 'key'
+    })
   }
 }
 
@@ -212,6 +229,26 @@ export async function seedDemoData(): Promise<void> {
       determiner: '',
       siteId: 'site_shr',
       note: '酒精浸液保存，待制片'
+    },
+    {
+      id: 'sp_005',
+      code: 'SHR-2026-0003',
+      order: '膜翅目',
+      family: '蚁科',
+      genus: 'Camponotus',
+      species: 'sp.',
+      tempName: '大黑弓背蚁',
+      collectDate: today,
+      collector: '蓝澈',
+      sex: '雌',
+      stage: '成虫',
+      bodyLength: 11.2,
+      method: '徒手',
+      quantity: 1,
+      status: '初鉴',
+      determiner: '覃羽',
+      siteId: 'site_shr',
+      note: '熏蒸期间由馆藏那头临时插进了 C02，占住了摇蚊的原插位'
     }
   ])
 
@@ -260,6 +297,121 @@ export async function seedDemoData(): Promise<void> {
       slot: 5,
       storedDate: today,
       handler: '覃羽'
+    },
+    // 熏蒸台账 FUM-2026H2-002 进行中：C02 整柜封闭
+    // sp_003 已出柜，馆藏台账把它挪到了 C02-D2-B03-S01（台账漂移），原插位 C02-D1-B02-S01 仍由处理组预留
+    {
+      id: 'stg_003',
+      specimenId: 'sp_003',
+      method: '针插',
+      cabinet: 'C02',
+      drawer: 2,
+      box: 3,
+      slot: 1,
+      storedDate: today,
+      handler: '覃羽'
+    },
+    // sp_005 被馆藏那头插进 C02-D1-B02-S02，占住了 sp_004 的预留插位 → sp_004 回迁受阻
+    {
+      id: 'stg_005',
+      specimenId: 'sp_005',
+      method: '针插',
+      cabinet: 'C02',
+      drawer: 1,
+      box: 2,
+      slot: 2,
+      storedDate: today,
+      handler: '覃羽'
+    }
+  ])
+
+  const nowIso = new Date().toISOString()
+
+  await db.treatmentOrders.bulkPut([
+    {
+      id: 'fum_001',
+      code: 'FUM-2026H1-001',
+      cabinets: ['C01'],
+      status: '已完成',
+      createdDate: today,
+      startedAt: `${today}T01:00:00.000Z`,
+      finishedAt: nowIso,
+      handler: '处理组 · 麦禾',
+      note: '上半年例行熏蒸，已全部回迁并解封',
+      rackCount: 2,
+      rackCapacity: 12
+    },
+    {
+      id: 'fum_002',
+      code: 'FUM-2026H2-001',
+      cabinets: ['C02'],
+      status: '熏蒸中',
+      createdDate: today,
+      startedAt: nowIso,
+      finishedAt: '',
+      handler: '处理组 · 麦禾',
+      note: '下半年例行熏蒸，C02 整柜封闭中；有一份回迁受阻待处理',
+      rackCount: 2,
+      rackCapacity: 12
+    }
+  ])
+
+  await db.treatmentItems.bulkPut([
+    {
+      id: 'fumi_001',
+      orderId: 'fum_001',
+      specimenId: 'sp_001',
+      specimenCode: 'QLB-2026-0001',
+      origin: { method: '针插', cabinet: 'C01', drawer: 1, box: 2, slot: 3 },
+      rack: 1,
+      rackSlot: 1,
+      status: '已回迁',
+      evacuatedAt: `${today}T01:00:00.000Z`,
+      returnedAt: `${today}T05:00:00.000Z`,
+      blockerCode: '',
+      lastResult: '已回迁原插位 C01-D1-B02-S03'
+    },
+    {
+      id: 'fumi_002',
+      orderId: 'fum_001',
+      specimenId: 'sp_002',
+      specimenCode: 'QLB-2026-0002',
+      origin: { method: '针插', cabinet: 'C01', drawer: 1, box: 2, slot: 5 },
+      rack: 1,
+      rackSlot: 2,
+      status: '已回迁',
+      evacuatedAt: `${today}T01:00:00.000Z`,
+      returnedAt: `${today}T05:00:00.000Z`,
+      blockerCode: '',
+      lastResult: '已回迁原插位 C01-D1-B02-S05'
+    },
+    {
+      id: 'fumi_003',
+      orderId: 'fum_002',
+      specimenId: 'sp_003',
+      specimenCode: 'SHR-2026-0001',
+      origin: { method: '针插', cabinet: 'C02', drawer: 1, box: 2, slot: 1 },
+      rack: 1,
+      rackSlot: 1,
+      status: '已出柜',
+      evacuatedAt: nowIso,
+      returnedAt: '',
+      blockerCode: '',
+      lastResult: '已疏散至转运架 R1-S01，原插位预留'
+    },
+    {
+      id: 'fumi_004',
+      orderId: 'fum_002',
+      specimenId: 'sp_004',
+      specimenCode: 'SHR-2026-0002',
+      origin: { method: '浸液', cabinet: 'C02', drawer: 1, box: 2, slot: 2 },
+      rack: 1,
+      rackSlot: 2,
+      status: '回迁受阻',
+      evacuatedAt: nowIso,
+      returnedAt: '',
+      blockerCode: 'SHR-2026-0003',
+      lastResult: '回迁被拦下：原插位 C02-D1-B02-S02 现由 SHR-2026-0003 占住'
     }
   ])
 }

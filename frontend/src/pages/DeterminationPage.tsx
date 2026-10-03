@@ -2,12 +2,15 @@ import { useMemo, useState } from 'react'
 import type { Confidence, DetStatus, Determination, Specimen } from '@/types'
 import { CONFIDENCES } from '@/types'
 import StatusTag from '@/components/common/StatusTag'
+import TreatmentTag from '@/components/common/TreatmentTag'
 import { usePersistentStore } from '@/hooks/usePersistentStore'
 import { determinationStore } from '@/stores/determinationStore'
 import { specimenStore } from '@/stores/specimenStore'
 import { siteStore } from '@/stores/siteStore'
+import { treatmentStore } from '@/stores/treatmentStore'
 import { downloadCsv } from '@/utils/export'
 import { specimenTaxon } from '@/utils/codec'
+import { encodeRack, latestTreatmentOf } from '@/utils/treatment'
 import { uid } from '@/utils/id'
 
 const QUEUE_STATUSES: DetStatus[] = ['待鉴定', '初鉴', '待复核']
@@ -17,6 +20,8 @@ export default function DeterminationPage(): JSX.Element {
   const specimens = usePersistentStore(specimenStore, (state) => state.rows)
   const sites = usePersistentStore(siteStore, (state) => state.rows)
   const determinations = usePersistentStore(determinationStore, (state) => state.rows)
+  const treatmentOrders = usePersistentStore(treatmentStore, (state) => state.orders)
+  const treatmentItems = usePersistentStore(treatmentStore, (state) => state.items)
 
   const queue = useMemo(
     () => specimens.filter((item) => QUEUE_STATUSES.includes(item.status)),
@@ -37,6 +42,10 @@ export default function DeterminationPage(): JSX.Element {
 
   const historyOf = (specimenId: string): Determination[] =>
     determinations.filter((item) => item.specimenId === specimenId)
+
+  const activeTreatment = active
+    ? latestTreatmentOf(treatmentOrders, treatmentItems, active.id)
+    : null
 
   const pick = (specimen: Specimen): void => {
     setActiveId(specimen.id)
@@ -159,6 +168,13 @@ export default function DeterminationPage(): JSX.Element {
               <p className="mt-1 text-xs text-slate-500">
                 {specimenTaxon(active)} · {siteName(active.siteId)} · 采集人 {active.collector || '—'} · 采集方式{' '}
                 {active.method} · 体长 {active.bodyLength} mm
+              </p>
+            ) : null}
+            {active && activeTreatment?.order.status === '熏蒸中' ? (
+              <p className="mt-2 flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700">
+                <TreatmentTag status={activeTreatment.item.status} />
+                该标本正在熏蒸（转运架 {encodeRack(activeTreatment.item.rack, activeTreatment.item.rackSlot)}
+                ），鉴定工作流照常落记录，入柜暂缓。
               </p>
             ) : null}
             <div className="mt-3 grid gap-3 md:grid-cols-2">

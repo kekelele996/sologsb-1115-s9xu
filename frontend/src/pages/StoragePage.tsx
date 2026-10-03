@@ -1,20 +1,25 @@
 import { useMemo, useState } from 'react'
 import type { Storage, StorageMethod } from '@/types'
 import { STORAGE_METHODS } from '@/types'
-import CabinetGrid from '@/components/common/CabinetGrid'
+import CabinetGrid, { type ReservedSlot } from '@/components/common/CabinetGrid'
 import StatusTag from '@/components/common/StatusTag'
+import TreatmentTag from '@/components/common/TreatmentTag'
 import { usePersistentStore } from '@/hooks/usePersistentStore'
 import { specimenStore } from '@/stores/specimenStore'
 import { storageStore } from '@/stores/storageStore'
 import { siteStore } from '@/stores/siteStore'
-import { encodeSlot, findSlotConflicts, specimenTaxon, storageSlotText } from '@/utils/codec'
+import { treatmentStore } from '@/stores/treatmentStore'
+import { encodeSlot, specimenTaxon, storageSlotText } from '@/utils/codec'
+import { activeOrders, encodeRack, isCabinetSealed, originSlotText, sealingOrdersOf } from '@/utils/treatment'
 import { uid } from '@/utils/id'
 
-/** 保藏柜位图：柜-抽屉-盒-位三级展开，拖拽调整插位，重复占用给出提示 */
+/** 保藏柜位图：柜-抽屉-盒-位三级展开，拖拽调整插位，重复占用给出提示；熏蒸封柜期间整柜只看不动 */
 export default function StoragePage(): JSX.Element {
   const specimens = usePersistentStore(specimenStore, (state) => state.rows)
   const storages = usePersistentStore(storageStore, (state) => state.rows)
   const sites = usePersistentStore(siteStore, (state) => state.rows)
+  const treatmentOrders = usePersistentStore(treatmentStore, (state) => state.orders)
+  const treatmentItems = usePersistentStore(treatmentStore, (state) => state.items)
 
   const [cabinet, setCabinet] = useState('C01')
   const [drawers, setDrawers] = useState(2)
@@ -33,10 +38,51 @@ export default function StoragePage(): JSX.Element {
   const placedIds = useMemo(() => new Set(storages.map((item) => item.specimenId)), [storages])
   const unplaced = specimens.filter((item) => !placedIds.has(item.id))
 
+  const sealed = isCabinetSealed(treatmentOrders, cabinet)
+  const active = activeOrders(treatmentOrders)
+
+  // 当前柜的熏蒸预留插位：进行中处理单里未回迁的明细，原插位仍算被它占着
+  const reserved: ReservedSlot[] = useMemo(() => {
+    const seals = sealingOrdersOf(treatmentOrders, cabinet)
+    const sealIds = new Set(seals.map((order) => order.id))
+    return treatmentItems
+      .filter((item) => sealIds.has(item.orderId) && item.status !== '已回迁')
+      .map((item) => ({
+        key: originSlotText(item),
+        specimenCode: specimens.find((sp) => sp.id === item.specimenId)?.code ?? item.specimenCode,
+        status: item.status
+      }))
+  }, [treatmentOrders, treatmentItems, cabinet, specimens])
+
+  // 熏蒸期间在转运架上的标本（全部进行中的单）
+  const onRack = useMemo(
+    () =>
+      treatmentItems
+        .filter((item) => item.status !== '已回迁')
+        .map((item) => ({
+          order: treatmentOrders.find((order) => order.id === item.orderId),
+          item
+        }))
+        .filter((entry): entry is { order: (typeof treatmentOrders)[number]; item: (typeof entry)['item'] } =>
+          Boolean(entry.order)
+        )
+        .sort((a, b) => encodeRack(a.item.rack, a.item.rackSlot).localeCompare(encodeRack(b.item.rack, b.item.rackSlot))),
+    [treatmentItems, treatmentOrders]
+  )
+
   const place = async (position: { cabinet: string; drawer: number; box: number; slot: number }): Promise<void> => {
     const specimenId = dragging ?? picked
     if (!specimenId) {
       setWarning('请先在右侧选择或拖动一份未入柜标本')
+      return
+    }
+    // 熏蒸封柜：入柜先缓一缓，整柜（含预留空位）都不接受新入柜
+    if (isCabinetSealed(treatmentOrders, position.cabinet)) {
+      setWarning(
+        `柜 ${position.cabinet.toUpperCase()} 正在熏蒸封闭，入柜暂缓；请等处理单解封后再把 ${codeOf(
+          specimenId
+        )} 放入 ${encodeSlot(position.cabinet, position.drawer, position.box, position.slot)}`
+      )
       return
     }
     const candidate: Storage = {
@@ -50,12 +96,21 @@ export default function StoragePage(): JSX.Element {
       storedDate: new Date().toISOString().slice(0, 10),
       handler: handler.trim()
     }
-    const conflicts = findSlotConflicts(storages, candidate)
-    if (conflicts.length > 0) {
+    const occupied = storages.some(
+      (item) =>
+        item.specimenId !== candidate.specimenId &&
+        encodeSlot(item.cabinet, item.drawer, item.box, item.slot) ===
+          encodeSlot(candidate.cabinet, candidate.drawer, candidate.box, candidate.slot)
+    )
+    if (occupied) {
+      const conflict = storages.find(
+        (item) =>
+          encodeSlot(item.cabinet, item.drawer, item.box, item.slot) ===
+          encodeSlot(candidate.cabinet, candidate.drawer, candidate.box, candidate.slot)
+      )
       setWarning(
         `柜位 ${encodeSlot(position.cabinet, position.drawer, position.box, position.slot)} 已被占用：` +
-          conflicts.map((item) => `${codeOf(item.specimenId)}（${item.method}）`).join('、') +
-          '，请换一个插位或先出柜'
+          `${conflict ? codeOf(conflict.specimenId) : ''}（${conflict?.method ?? ''}），请换一个插位或先出柜`
       )
       return
     }
@@ -78,6 +133,7 @@ export default function StoragePage(): JSX.Element {
         <h1 className="page-title">保藏柜位图</h1>
         <p className="page-sub">
           按柜—抽屉—盒三级展开插位，空位虚线显示；拖动标本到插位即可入柜，重复占用会列出已有标本。
+          熏蒸封闭中的柜子整柜暂缓入柜，已疏散标本的原插位标为「预留」。
         </p>
       </header>
 
@@ -114,10 +170,17 @@ export default function StoragePage(): JSX.Element {
         </div>
         <div className="text-xs text-slate-500">
           已入柜 {storages.length} 份 · 未入柜 {unplaced.length} 份
+          {active.length > 0 ? ` · 熏蒸封闭 ${active.length} 单 · 架上 ${onRack.length} 份` : ''}
           {picked ? ` · 当前选中 ${codeOf(picked)}` : ''}
         </div>
       </section>
 
+      {sealed ? (
+        <p className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm text-indigo-800">
+          柜 {cabinet} 已被处理单 {sealingOrdersOf(treatmentOrders, cabinet).map((order) => order.code).join('、')}{' '}
+          整柜封闭，熏蒸期间本柜暂不接受入柜；标本在转运架上，原插位全部预留。回迁受阻的份请在「熏蒸处理单」页处理。
+        </p>
+      ) : null}
       {warning ? <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">{warning}</p> : null}
       {message ? <p className="rounded-lg border border-field-100 bg-field-50 px-3 py-2 text-sm text-field-700">{message}</p> : null}
 
@@ -128,13 +191,44 @@ export default function StoragePage(): JSX.Element {
           boxes={boxes}
           slots={slots}
           storages={storages}
+          reserved={reserved}
+          sealed={sealed}
           codeOf={codeOf}
           draggingCode={dragging ? codeOf(dragging) : picked ? codeOf(picked) : null}
           onDropSlot={(position) => void place(position)}
           onPickStorage={(storage) => setDetail(storage)}
+          onPickReserved={(entry) =>
+            setWarning(`插位 ${entry.key} 是熏蒸预留位：${entry.specimenCode}（${entry.status}），封闭期间不得占用`)
+          }
         />
 
         <div className="flex flex-col gap-4">
+          {onRack.length > 0 ? (
+            <div className="panel border-indigo-200">
+              <h2 className="text-sm font-semibold text-slate-700">转运架（熏蒸中 {onRack.length} 份）</h2>
+              <div className="mt-2 max-h-60 space-y-2 overflow-auto">
+                {onRack.map(({ order, item }) => (
+                  <div key={item.id} className="rounded-lg border border-indigo-100 bg-indigo-50/40 px-3 py-2 text-xs">
+                    <p className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-field-700">
+                        {codeOf(item.specimenId)}
+                      </span>
+                      <TreatmentTag status={item.status} />
+                    </p>
+                    <p className="mt-0.5 text-slate-500">
+                      架位 <span className="font-mono">{encodeRack(item.rack, item.rackSlot)}</span> · 原插位{' '}
+                      <span className="font-mono">{originSlotText(item)}</span>（预留）
+                    </p>
+                    <p className="text-slate-400">
+                      {order.code}
+                      {item.blockerCode ? ` · 被 ${item.blockerCode} 占住` : ''}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div className="panel">
             <h2 className="text-sm font-semibold text-slate-700">未入柜标本（拖到插位）</h2>
             <div className="mt-2 max-h-72 space-y-2 overflow-auto">

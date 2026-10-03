@@ -1,27 +1,45 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { DetStatus, Specimen } from '@/types'
-import { DET_STATUSES } from '@/types'
+import type { DetStatus, Specimen, TreatmentFilterStatus } from '@/types'
+import { DET_STATUSES, TREATMENT_FILTER_STATUSES } from '@/types'
 import SpecimenCard from '@/components/common/SpecimenCard'
 import StatusTag from '@/components/common/StatusTag'
+import TreatmentTag from '@/components/common/TreatmentTag'
 import { usePersistentStore } from '@/hooks/usePersistentStore'
 import { useSpecimenFilter } from '@/hooks/useSpecimenFilter'
 import { specimenStore } from '@/stores/specimenStore'
 import { siteStore } from '@/stores/siteStore'
+import { treatmentStore } from '@/stores/treatmentStore'
 import { downloadCsv } from '@/utils/export'
+import { latestTreatmentOf } from '@/utils/treatment'
 import { specimenTaxon } from '@/utils/codec'
 
 /** 标本清单：组合筛选 + 多选批量推进鉴定状态 */
 export default function SpecimensPage(): JSX.Element {
   const specimens = usePersistentStore(specimenStore, (state) => state.rows)
   const sites = usePersistentStore(siteStore, (state) => state.rows)
-  const { filter, setFilter, reset, filtered, hitCount, orders, families } = useSpecimenFilter(specimens)
+  const treatmentOrders = usePersistentStore(treatmentStore, (state) => state.orders)
+  const treatmentItems = usePersistentStore(treatmentStore, (state) => state.items)
+  const { filter, setFilter, reset, filtered, hitCount, orders, families } = useSpecimenFilter(specimens, {
+    orders: treatmentOrders,
+    items: treatmentItems
+  })
   const [selected, setSelected] = useState<string[]>([])
   const [batchStatus, setBatchStatus] = useState<DetStatus>('初鉴')
   const [message, setMessage] = useState('')
 
   const siteMap = useMemo(() => new Map(sites.map((site) => [site.id, site])), [sites])
   const selectedSet = useMemo(() => new Set(selected), [selected])
+
+  const treatmentBadgeOf = (specimen: Specimen): JSX.Element | null => {
+    const current = latestTreatmentOf(treatmentOrders, treatmentItems, specimen.id)
+    if (!current) return null
+    return (
+      <span className="flex items-center gap-1.5" title={`${current.order.code} · ${current.item.lastResult}`}>
+        <TreatmentTag status={current.item.status} />
+      </span>
+    )
+  }
 
   const toggle = (id: string): void => {
     setSelected((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
@@ -128,6 +146,21 @@ export default function SpecimensPage(): JSX.Element {
           </select>
         </div>
         <div>
+          <span className="field-label">熏蒸处理状态</span>
+          <select
+            className="field-input w-36"
+            value={filter.treatmentStatus}
+            onChange={(e) => setFilter({ treatmentStatus: e.target.value as TreatmentFilterStatus | '' })}
+          >
+            <option value="">全部</option>
+            {TREATMENT_FILTER_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
           <span className="field-label">采集地</span>
           <select
             className="field-input w-48"
@@ -214,6 +247,7 @@ export default function SpecimensPage(): JSX.Element {
             selectable
             selected={selectedSet.has(specimen.id)}
             onToggle={toggle}
+            badge={treatmentBadgeOf(specimen)}
             footer={
               <>
                 <Link className="btn-ghost" to="/determination">

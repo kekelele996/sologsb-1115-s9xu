@@ -6,3 +6,12 @@ export { STORAGE_METHODS } from './storage'
 export type { Storage, StorageMethod } from './storage'
 export { CONFIDENCES } from './determination'
 export type { Determination, Confidence } from './determination'
+export { TREATMENT_ORDER_STATUSES, TREATMENT_ITEM_STATUSES, TREATMENT_FILTER_STATUSES } from './treatment'
+export type {
+  TreatmentOrder,
+  TreatmentItem,
+  TreatmentOrderStatus,
+  TreatmentItemStatus,
+  TreatmentFilterStatus,
+  OriginSlot
+} from './treatment'
