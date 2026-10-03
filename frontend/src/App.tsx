@@ -4,13 +4,15 @@ import { specimenStore } from '@/stores/specimenStore'
 import { siteStore } from '@/stores/siteStore'
 import { storageStore } from '@/stores/storageStore'
 import { determinationStore } from '@/stores/determinationStore'
+import { fumigationStore } from '@/stores/fumigationStore'
 
 const NAV = [
   { to: '/specimens', label: '标本清单', hint: '筛选 / 批量推进' },
   { to: '/collect', label: '采集登记', hint: '同批次多份录入' },
   { to: '/sites', label: '采集地管理', hint: '坐标校验 / 合并' },
   { to: '/determination', label: '鉴定工作流', hint: '待鉴定队列' },
-  { to: '/storage', label: '保藏柜位图', hint: '柜-屉-盒-位' }
+  { to: '/storage', label: '保藏柜位图', hint: '柜-屉-盒-位' },
+  { to: '/fumigation', label: '熏蒸处理', hint: '处理单 / 回迁' }
 ]
 
 /** 应用外壳：左侧导航 + 顶部状态条 + 路由出口 */
@@ -19,8 +21,11 @@ export default function AppLayout(): JSX.Element {
   const sites = usePersistentStore(siteStore, (state) => state.rows)
   const storages = usePersistentStore(storageStore, (state) => state.rows)
   const determinations = usePersistentStore(determinationStore, (state) => state.rows)
+  const orders = usePersistentStore(fumigationStore, (state) => state.orders)
+  const items = usePersistentStore(fumigationStore, (state) => state.items)
 
   const pending = specimens.filter((item) => item.status === '待鉴定').length
+  const fumigating = items.filter((item) => item.status === '在转运架').length
 
   return (
     <div className="flex min-h-screen">
@@ -70,6 +75,14 @@ export default function AppLayout(): JSX.Element {
           <div className="flex justify-between">
             <dt>鉴定记录</dt>
             <dd className="font-semibold">{determinations.length}</dd>
+          </div>
+          <div className="flex justify-between">
+            <dt>熏蒸中</dt>
+            <dd className="font-semibold">{fumigating}</dd>
+          </div>
+          <div className="flex justify-between">
+            <dt>处理单</dt>
+            <dd className="font-semibold">{orders.length}</dd>
           </div>
           <p className="pt-1 text-[11px] leading-relaxed text-field-100/70">
             数据保存在浏览器 IndexedDB，无需后端服务

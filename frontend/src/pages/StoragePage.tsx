@@ -7,14 +7,18 @@ import { usePersistentStore } from '@/hooks/usePersistentStore'
 import { specimenStore } from '@/stores/specimenStore'
 import { storageStore } from '@/stores/storageStore'
 import { siteStore } from '@/stores/siteStore'
+import { fumigationStore } from '@/stores/fumigationStore'
 import { encodeSlot, findSlotConflicts, specimenTaxon, storageSlotText } from '@/utils/codec'
+import { inTransferSpecimenIds, isCabinetSealed } from '@/utils/fumigation'
 import { uid } from '@/utils/id'
 
-/** 保藏柜位图：柜-抽屉-盒-位三级展开，拖拽调整插位，重复占用给出提示 */
+/** 保藏柜位图：柜-抽屉-盒-位三级展开，拖拽调整插位，重复占用给出提示；熏蒸封闭的柜暂停入柜 */
 export default function StoragePage(): JSX.Element {
   const specimens = usePersistentStore(specimenStore, (state) => state.rows)
   const storages = usePersistentStore(storageStore, (state) => state.rows)
   const sites = usePersistentStore(siteStore, (state) => state.rows)
+  const orders = usePersistentStore(fumigationStore, (state) => state.orders)
+  const fumItems = usePersistentStore(fumigationStore, (state) => state.items)
 
   const [cabinet, setCabinet] = useState('C01')
   const [drawers, setDrawers] = useState(2)
@@ -32,8 +36,16 @@ export default function StoragePage(): JSX.Element {
   const siteName = (siteId: string): string => sites.find((site) => site.id === siteId)?.name ?? '未关联采集地'
   const placedIds = useMemo(() => new Set(storages.map((item) => item.specimenId)), [storages])
   const unplaced = specimens.filter((item) => !placedIds.has(item.id))
+  /** 正在熏蒸转运架上的标本（原插位仍预留） */
+  const inTransferIds = useMemo(() => inTransferSpecimenIds(orders, fumItems), [orders, fumItems])
+  /** 当前查看的柜是否被熏蒸封闭 */
+  const sealed = useMemo(() => isCabinetSealed(orders, cabinet), [orders, cabinet])
 
   const place = async (position: { cabinet: string; drawer: number; box: number; slot: number }): Promise<void> => {
+    if (isCabinetSealed(orders, position.cabinet)) {
+      setWarning(`柜 ${position.cabinet} 正在熏蒸封闭中，暂停入柜（熏蒸完回迁后再放）`)
+      return
+    }
     const specimenId = dragging ?? picked
     if (!specimenId) {
       setWarning('请先在右侧选择或拖动一份未入柜标本')
@@ -67,6 +79,10 @@ export default function StoragePage(): JSX.Element {
   }
 
   const takeOut = async (storage: Storage): Promise<void> => {
+    if (inTransferIds.has(storage.specimenId)) {
+      setWarning(`${codeOf(storage.specimenId)} 正在熏蒸转运架上，原插位预留中，暂不可出柜`)
+      return
+    }
     await storageStore.getState().remove(storage.id)
     setMessage(`${codeOf(storage.specimenId)} 已从 ${storageSlotText(storage)} 出柜`)
     setDetail(null)
@@ -120,6 +136,11 @@ export default function StoragePage(): JSX.Element {
 
       {warning ? <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">{warning}</p> : null}
       {message ? <p className="rounded-lg border border-field-100 bg-field-50 px-3 py-2 text-sm text-field-700">{message}</p> : null}
+      {sealed ? (
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          柜 {cabinet} 正在熏蒸封闭中：整柜暂停入柜，柜内标本已进转运架（原插位仍预留）。熏蒸完请到「熏蒸处理」逐份回迁。
+        </p>
+      ) : null}
 
       <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <CabinetGrid
@@ -129,6 +150,7 @@ export default function StoragePage(): JSX.Element {
           slots={slots}
           storages={storages}
           codeOf={codeOf}
+          inTransferIds={inTransferIds}
           draggingCode={dragging ? codeOf(dragging) : picked ? codeOf(picked) : null}
           onDropSlot={(position) => void place(position)}
           onPickStorage={(storage) => setDetail(storage)}

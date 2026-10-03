@@ -8,14 +8,24 @@ import { usePersistentStore } from '@/hooks/usePersistentStore'
 import { useSpecimenFilter } from '@/hooks/useSpecimenFilter'
 import { specimenStore } from '@/stores/specimenStore'
 import { siteStore } from '@/stores/siteStore'
+import { fumigationStore } from '@/stores/fumigationStore'
 import { downloadCsv } from '@/utils/export'
 import { specimenTaxon } from '@/utils/codec'
+import { specimenProcessingStatus, type ProcessingStatus } from '@/utils/fumigation'
+
+const PROCESSING_STATUSES: ProcessingStatus[] = ['未处理', '待熏蒸', '熏蒸中', '已回迁']
 
 /** 标本清单：组合筛选 + 多选批量推进鉴定状态 */
 export default function SpecimensPage(): JSX.Element {
   const specimens = usePersistentStore(specimenStore, (state) => state.rows)
   const sites = usePersistentStore(siteStore, (state) => state.rows)
-  const { filter, setFilter, reset, filtered, hitCount, orders, families } = useSpecimenFilter(specimens)
+  const orders = usePersistentStore(fumigationStore, (state) => state.orders)
+  const items = usePersistentStore(fumigationStore, (state) => state.items)
+  const { filter, setFilter, reset, filtered, hitCount, orders: orderOptions, families } = useSpecimenFilter(
+    specimens,
+    orders,
+    items
+  )
   const [selected, setSelected] = useState<string[]>([])
   const [batchStatus, setBatchStatus] = useState<DetStatus>('初鉴')
   const [message, setMessage] = useState('')
@@ -50,6 +60,7 @@ export default function SpecimensPage(): JSX.Element {
       method: item.method,
       quantity: item.quantity,
       status: item.status,
+      processingStatus: specimenProcessingStatus(orders, items, item.id),
       determiner: item.determiner
     }))
     downloadCsv('标本清单.csv', rows as unknown as Record<string, unknown>[], [
@@ -60,6 +71,7 @@ export default function SpecimensPage(): JSX.Element {
       { key: 'method', label: '采集方式' },
       { key: 'quantity', label: '数量' },
       { key: 'status', label: '鉴定状态' },
+      { key: 'processingStatus', label: '处理状态' },
       { key: 'determiner', label: '鉴定人' }
     ])
   }
@@ -90,7 +102,7 @@ export default function SpecimensPage(): JSX.Element {
           <span className="field-label">目</span>
           <select className="field-input w-36" value={filter.order} onChange={(e) => setFilter({ order: e.target.value })}>
             <option value="">全部</option>
-            {orders.map((order) => (
+            {orderOptions.map((order) => (
               <option key={order} value={order}>
                 {order}
               </option>
@@ -121,6 +133,21 @@ export default function SpecimensPage(): JSX.Element {
           >
             <option value="">全部</option>
             {DET_STATUSES.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <span className="field-label">处理状态</span>
+          <select
+            className="field-input w-32"
+            value={filter.processingStatus}
+            onChange={(e) => setFilter({ processingStatus: e.target.value as ProcessingStatus | '' })}
+          >
+            <option value="">全部</option>
+            {PROCESSING_STATUSES.map((status) => (
               <option key={status} value={status}>
                 {status}
               </option>
@@ -213,6 +240,7 @@ export default function SpecimensPage(): JSX.Element {
             site={siteMap.get(specimen.siteId)}
             selectable
             selected={selectedSet.has(specimen.id)}
+            processingStatus={specimenProcessingStatus(orders, items, specimen.id)}
             onToggle={toggle}
             footer={
               <>

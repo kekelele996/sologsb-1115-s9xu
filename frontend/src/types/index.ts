@@ -6,3 +6,11 @@ export { STORAGE_METHODS } from './storage'
 export type { Storage, StorageMethod } from './storage'
 export { CONFIDENCES } from './determination'
 export type { Determination, Confidence } from './determination'
+export { FUMIGATION_STATUSES, FUMIGATION_ITEM_STATUSES } from './fumigation'
+export type {
+  FumigationOrder,
+  FumigationItem,
+  FumigationStatus,
+  FumigationItemStatus,
+  SlotPosition
+} from './fumigation'

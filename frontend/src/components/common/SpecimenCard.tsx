@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import type { CollectSite, Specimen } from '@/types'
 import { specimenTaxon } from '@/utils/codec'
+import type { ProcessingStatus } from '@/utils/fumigation'
+import ProcessingStatusTag from './ProcessingStatusTag'
 import StatusTag from './StatusTag'
 
 export interface SpecimenCardProps {
@@ -10,6 +12,8 @@ export interface SpecimenCardProps {
   selected?: boolean
   /** 左上角勾选（批量操作） */
   selectable?: boolean
+  /** 熏蒸处理状态（未处理 / 待熏蒸 / 熏蒸中 / 已回迁） */
+  processingStatus?: ProcessingStatus
   onToggle?: (id: string) => void
   onOpen?: (specimen: Specimen) => void
   /** 卡片底部自定义操作区 */
@@ -22,6 +26,7 @@ export default function SpecimenCard({
   site,
   selected = false,
   selectable = false,
+  processingStatus,
   onToggle,
   onOpen,
   footer
@@ -60,7 +65,10 @@ export default function SpecimenCard({
             </p>
           </div>
         </div>
-        <StatusTag status={specimen.status} />
+        <div className="flex flex-col items-end gap-1">
+          <StatusTag status={specimen.status} />
+          {processingStatus ? <ProcessingStatusTag status={processingStatus} /> : null}
+        </div>
       </header>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-slate-600">
         <div>

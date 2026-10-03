@@ -10,6 +10,8 @@ export interface CabinetGridProps {
   storages: Storage[]
   /** 每个标本编号，用于显示占用 */
   codeOf: (specimenId: string) => string
+  /** 正在熏蒸转运架上的标本 id（原插位仍预留，显示「熏蒸中」） */
+  inTransferIds?: Set<string>
   /** 当前拖拽中的标本编号 */
   draggingCode: string | null
   /** 点击或拖放到某个插位 */
@@ -18,7 +20,7 @@ export interface CabinetGridProps {
   footer?: ReactNode
 }
 
-/** 柜位网格：柜 → 抽屉 → 盒 → 插位，插位作为拖放目标 */
+/** 柜位网格：柜 → 抽屉 → 盒 → 插位，插位作为拖放目标；熏蒸中的插位显示「熏蒸中」 */
 export default function CabinetGrid({
   cabinet,
   drawers,
@@ -26,6 +28,7 @@ export default function CabinetGrid({
   slots,
   storages,
   codeOf,
+  inTransferIds,
   draggingCode,
   onDropSlot,
   onPickStorage,
@@ -61,11 +64,12 @@ export default function CabinetGrid({
                   {slotList.map((slot) => {
                     const storage = slotMap.get(encodeSlot(cabinet, drawer, box, slot))
                     const code = storage ? codeOf(storage.specimenId) : ''
+                    const inTransfer = storage ? inTransferIds?.has(storage.specimenId) === true : false
                     return (
                       <button
                         key={slot}
                         type="button"
-                        title={storage ? `占用：${code}` : '空位'}
+                        title={storage ? (inTransfer ? `熏蒸中（转运架）：${code}` : `占用：${code}`) : '空位'}
                         onClick={() =>
                           storage && onPickStorage ? onPickStorage(storage) : onDropSlot({ cabinet, drawer, box, slot })
                         }
@@ -76,12 +80,14 @@ export default function CabinetGrid({
                         }}
                         className={`h-12 w-16 rounded-md border text-[11px] leading-tight transition ${
                           storage
-                            ? 'border-field-500 bg-field-50 text-field-700 hover:bg-field-100'
+                            ? inTransfer
+                              ? 'border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                              : 'border-field-500 bg-field-50 text-field-700 hover:bg-field-100'
                             : 'border-dashed border-slate-300 bg-slate-50 text-slate-400 hover:border-field-500 hover:text-field-600'
                         }`}
                       >
                         <span className="block font-mono">{storage ? code : `S${String(slot).padStart(2, '0')}`}</span>
-                        <span className="block">{storage ? '占用' : '空位'}</span>
+                        <span className="block">{storage ? (inTransfer ? '熏蒸中' : '占用') : '空位'}</span>
                       </button>
                     )
                   })}
